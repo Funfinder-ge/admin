@@ -14,8 +14,7 @@ import Countries from './pages/Countries';
 import Categories from './pages/Categories';
 import Companies from './pages/Companies';
 import Users from './pages/Users';
-import Orders from './pages/Orders';
-import Settings from './pages/Settings';
+// import Orders from './pages/Orders';
 import Login from './pages/Login';
 import Unauthorized from './pages/Unauthorized';
 import InsufficientPermissions from './pages/InsufficientPermissions';
@@ -40,19 +39,27 @@ const AppContent = () => {
   return (
     <>
       <SessionManager />
-      <Box sx={{ display: 'flex' }}>
+      <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
         <Sidebar />
-        <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, mt: { xs: 7, md: 8 } }}>
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            width: { md: `calc(100% - 264px)` },
+            px: { xs: 2, md: 4 },
+            py: { xs: 2, md: 3 },
+            mt: { xs: '60px', md: '68px' },
+          }}
+        >
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/events" element={<Events />} />
-            <Route path="/orders" element={<ErrorBoundary><Orders /></ErrorBoundary>} />
+            {/* <Route path="/orders" element={<ErrorBoundary><Orders /></ErrorBoundary>} /> */}
             <Route path="/cities" element={<ErrorBoundary><Cities /></ErrorBoundary>} />
             <Route path="/countries" element={<ErrorBoundary><Countries /></ErrorBoundary>} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/companies" element={<ErrorBoundary><Companies /></ErrorBoundary>} />
             <Route path="/users" element={<Users />} />
-            <Route path="/settings" element={<Settings />} />
             <Route path="/slider" element={<Slider />} />
 
           </Routes>

@@ -77,14 +77,37 @@ const addAuthInterceptor = (instance) => {
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-      
+
+      // For FormData bodies, strip any inherited Content-Type so axios
+      // generates the correct `multipart/form-data; boundary=...` header.
+      // Without this, the instance default `application/json` would override
+      // the multipart header and the server would silently drop the file.
+      if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+        if (config.headers) {
+          if (typeof config.headers.delete === 'function') {
+            config.headers.delete('Content-Type');
+          } else {
+            delete config.headers['Content-Type'];
+            delete config.headers['content-type'];
+          }
+          // Also clear method-specific defaults if present
+          ['post', 'put', 'patch', 'common'].forEach((method) => {
+            const bucket = config.headers[method];
+            if (bucket && typeof bucket === 'object') {
+              delete bucket['Content-Type'];
+              delete bucket['content-type'];
+            }
+          });
+        }
+      }
+
       console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
       console.log('Request config:', {
         method: config.method,
         headers: config.headers,
         data: config.data
       });
-      
+
       return config;
     },
     (error) => {
@@ -203,7 +226,7 @@ class ApiService {
 }
 
 // Create API service instance
-const apiService = new ApiService();
+const   apiService = new ApiService();
 
 // Create v2 API service class
 class ApiServiceV2 {
@@ -256,17 +279,32 @@ export const eventApi = {
   getPopular: () => apiService.get('/event/feed/popular'),
   getFeatured: () => apiService.get('/event/feed/featured'),
   getDiscounted: () => apiService.get('/event/feed/discounted'),
-  getById: (id) => apiService.get(`/event/${id}`),
+  getById: (id) => apiService.get(`/event/details/${id}`),
   create: (data) => apiService.post('/event/create', data),
   getDetails: (id) => apiService.get(`/event/details/${id}`),
   update: (id, data) => apiService.patch(`/event/update/${id}`, data),
   delete: (id) => apiService.delete(`/event/delete/${id}`),
-  // Event Images
-  uploadImage: (eventId, formData) => apiService.post(`/event/${eventId}/images`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
+  // Event Images — POST /event/{event_id}/images (no trailing slash)
+  // Form data: image (file), alt_text (string), is_primary (boolean).
+  // Matches the slider upload pattern: axios.post with explicit
+  // `multipart/form-data`. The request interceptor strips that header so
+  // axios+FormData regenerates it with the proper boundary.
+  uploadImage: (eventId, formData) => {
+    console.log('[uploadImage] POST /event/' + eventId + '/images');
+    if (formData instanceof FormData) {
+      console.log('[uploadImage] outgoing parts:');
+      for (const [k, v] of formData.entries()) {
+        if (v instanceof File || v instanceof Blob) {
+          console.log(`  ${k}: <File name="${v.name || ''}" type="${v.type || ''}" size=${v.size}>`);
+        } else {
+          console.log(`  ${k}:`, v);
+        }
+      }
     }
-  }),
+    return apiService.post(`/event/${eventId}/images`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
   updateImage: (eventId, imageId, data) => apiService.put(`/event/${eventId}/images/update/${imageId}`, data),
   deleteImage: (eventId, imageId) => apiService.delete(`/event/${eventId}/images/delete/${imageId}`),
 };

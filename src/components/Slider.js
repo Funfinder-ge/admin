@@ -220,7 +220,7 @@ const Slider = () => {
                       <TableCell>
                         {slider.image && (
                           <img 
-                            src={slider.image} 
+                            src={`https://base.funfinder.ge${slider.image}`} 
                             alt={slider.title} 
                             style={{ maxWidth: '100px', maxHeight: '50px', objectFit: 'contain' }} 
                           />

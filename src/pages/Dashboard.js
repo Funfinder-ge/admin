@@ -9,6 +9,11 @@ import {
   CircularProgress,
   Alert,
   Button,
+  Stack,
+  Chip,
+  IconButton,
+  alpha,
+  useTheme,
 } from '@mui/material';
 import {
   BarChart,
@@ -18,11 +23,10 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell,
+  Legend,
 } from 'recharts';
 import {
   Event as EventIcon,
@@ -32,11 +36,95 @@ import {
   LocationCity as CityIcon,
   Public as CountryIcon,
   Category as CategoryIcon,
+  Refresh as RefreshIcon,
+  ArrowUpward as ArrowUpIcon,
+  ArrowDownward as ArrowDownIcon,
+  Dashboard as DashboardIcon,
 } from '@mui/icons-material';
+import PageHeader from '../components/PageHeader';
 import { staffApi, eventApi, categoryApi, countryApi, cityApi, companyApi } from '../services/api';
-import createAxiosInstance from '../services/axios';
+
+const unwrap = (response) => {
+  if (Array.isArray(response)) return response;
+  if (response?.data && Array.isArray(response.data)) return response.data;
+  if (response?.results && Array.isArray(response.results)) return response.results;
+  if (response?.events && Array.isArray(response.events)) return response.events;
+  if (response?.users && Array.isArray(response.users)) return response.users;
+  if (response?.companies && Array.isArray(response.companies)) return response.companies;
+  return [];
+};
+
+const StatCard = ({ title, value, icon, accent, delta, deltaLabel }) => {
+  const theme = useTheme();
+  const positive = (delta ?? 0) >= 0;
+  return (
+    <Card sx={{ height: '100%', overflow: 'hidden', position: 'relative' }}>
+      <Box
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          background: `radial-gradient(120% 100% at 100% 0%, ${alpha(accent, 0.08)} 0%, rgba(255,255,255,0) 60%)`,
+          pointerEvents: 'none',
+        }}
+      />
+      <CardContent sx={{ position: 'relative' }}>
+        <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1.5}>
+          <Box>
+            <Typography
+              sx={{
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                color: 'text.secondary',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {title}
+            </Typography>
+            <Typography sx={{ fontSize: '2rem', fontWeight: 800, mt: 0.5, lineHeight: 1.05, letterSpacing: '-0.02em' }}>
+              {value}
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              width: 44, height: 44,
+              borderRadius: 2,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              bgcolor: alpha(accent, 0.12),
+              color: accent,
+              flexShrink: 0,
+            }}
+          >
+            {icon}
+          </Box>
+        </Stack>
+        {typeof delta === 'number' && (
+          <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 1.5 }}>
+            <Chip
+              size="small"
+              icon={positive ? <ArrowUpIcon sx={{ fontSize: 14 }} /> : <ArrowDownIcon sx={{ fontSize: 14 }} />}
+              label={`${positive ? '+' : ''}${delta}%`}
+              sx={{
+                height: 22,
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                bgcolor: positive ? alpha(theme.palette.success.main, 0.12) : alpha(theme.palette.error.main, 0.12),
+                color: positive ? theme.palette.success.main : theme.palette.error.main,
+                '& .MuiChip-icon': { color: 'inherit', ml: 0.5 },
+              }}
+            />
+            {deltaLabel && (
+              <Typography variant="caption" color="text.secondary">{deltaLabel}</Typography>
+            )}
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
 
 const Dashboard = () => {
+  const theme = useTheme();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState({
@@ -47,161 +135,30 @@ const Dashboard = () => {
     countries: 0,
     companies: 0,
   });
-  const [monthlyData, setMonthlyData] = useState([
-    { name: 'Jan', events: 25, users: 80, revenue: 25000 },
-    { name: 'Feb', events: 30, users: 95, revenue: 32000 },
-    { name: 'Mar', events: 35, users: 110, revenue: 38000 },
-    { name: 'Apr', events: 28, users: 85, revenue: 29000 },
-    { name: 'May', events: 40, users: 120, revenue: 45000 },
-    { name: 'Jun', events: 45, users: 135, revenue: 52000 },
-  ]);
-  const [categoryData, setCategoryData] = useState([
-    { name: 'Water Activities', value: 35, color: '#0088FE' },
-    { name: 'Land Activities', value: 25, color: '#00C49F' },
-    { name: 'Entertainment', value: 20, color: '#FFBB28' },
-    { name: 'Cultural', value: 15, color: '#FF8042' },
-    { name: 'Adventure', value: 5, color: '#8884D8' },
-  ]);
+  const [monthlyData, setMonthlyData] = useState([]);
+  const [categoryData, setCategoryData] = useState([]);
 
-  const axiosInstance = createAxiosInstance();
-
-  // Fetch dashboard data
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Initialize variables
-      let eventsList = [];
-      let usersList = [];
-      let categoriesList = [];
-      let citiesList = [];
-      let countriesList = [];
-      let companiesList = [];
+      const [eventsRes, usersRes, categoriesRes, citiesRes, countriesRes, companiesRes] = await Promise.allSettled([
+        eventApi.getAll(),
+        staffApi.getAll(),
+        categoryApi.getAll(),
+        cityApi.getAll(),
+        countryApi.getAll(),
+        companyApi.getAll(),
+      ]);
 
-      // Fetch events count
-      try {
-        console.log('Fetching events...');
-        // Use the event API service
-        const eventsResponse = await eventApi.getAll();
-        console.log('Events response:', eventsResponse);
-        
-        if (Array.isArray(eventsResponse)) {
-          eventsList = eventsResponse;
-        } else if (eventsResponse?.data && Array.isArray(eventsResponse.data)) {
-          eventsList = eventsResponse.data;
-        } else if (eventsResponse?.results && Array.isArray(eventsResponse.results)) {
-          eventsList = eventsResponse.results;
-        } else if (eventsResponse?.events && Array.isArray(eventsResponse.events)) {
-          eventsList = eventsResponse.events;
-        }
-        console.log('Processed events list:', eventsList);
-      } catch (eventsError) {
-        console.error('Error fetching events:', eventsError);
-        eventsList = [];
-      }
+      const eventsList = eventsRes.status === 'fulfilled' ? unwrap(eventsRes.value) : [];
+      const usersList = usersRes.status === 'fulfilled' ? unwrap(usersRes.value) : [];
+      const categoriesList = categoriesRes.status === 'fulfilled' ? unwrap(categoriesRes.value) : [];
+      const citiesList = citiesRes.status === 'fulfilled' ? unwrap(citiesRes.value) : [];
+      const countriesList = countriesRes.status === 'fulfilled' ? unwrap(countriesRes.value) : [];
+      const companiesList = companiesRes.status === 'fulfilled' ? unwrap(companiesRes.value) : [];
 
-      // Fetch users count
-      try {
-        console.log('Fetching users...');
-        const usersResponse = await staffApi.getAll();
-        console.log('Users response:', usersResponse);
-        
-        if (Array.isArray(usersResponse)) {
-          usersList = usersResponse;
-        } else if (usersResponse?.data && Array.isArray(usersResponse.data)) {
-          usersList = usersResponse.data;
-        } else if (usersResponse?.results && Array.isArray(usersResponse.results)) {
-          usersList = usersResponse.results;
-        } else if (usersResponse?.users && Array.isArray(usersResponse.users)) {
-          usersList = usersResponse.users;
-        }
-        console.log('Processed users list:', usersList);
-      } catch (usersError) {
-        console.error('Error fetching users:', usersError);
-        usersList = [];
-      }
-
-      // Fetch categories count
-      try {
-        console.log('Fetching categories...');
-        const categoriesResponse = await categoryApi.getAll();
-        console.log('Categories response:', categoriesResponse);
-        
-        if (Array.isArray(categoriesResponse)) {
-          categoriesList = categoriesResponse;
-        } else if (categoriesResponse?.data && Array.isArray(categoriesResponse.data)) {
-          categoriesList = categoriesResponse.data;
-        } else if (categoriesResponse?.results && Array.isArray(categoriesResponse.results)) {
-          categoriesList = categoriesResponse.results;
-        }
-        console.log('Processed categories list:', categoriesList);
-      } catch (categoriesError) {
-        console.error('Error fetching categories:', categoriesError);
-        categoriesList = [];
-      }
-
-      // Fetch cities count
-      try {
-        console.log('Fetching cities...');
-        const citiesResponse = await cityApi.getAll();
-        console.log('Cities response:', citiesResponse);
-        
-        if (Array.isArray(citiesResponse)) {
-          citiesList = citiesResponse;
-        } else if (citiesResponse?.data && Array.isArray(citiesResponse.data)) {
-          citiesList = citiesResponse.data;
-        } else if (citiesResponse?.results && Array.isArray(citiesResponse.results)) {
-          citiesList = citiesResponse.results;
-        }
-        console.log('Processed cities list:', citiesList);
-      } catch (citiesError) {
-        console.error('Error fetching cities:', citiesError);
-        citiesList = [];
-      }
-
-      // Fetch countries count
-      try {
-        console.log('Fetching countries...');
-        const countriesResponse = await countryApi.getAll();
-        console.log('Countries response:', countriesResponse);
-        
-        if (Array.isArray(countriesResponse)) {
-          countriesList = countriesResponse;
-        } else if (countriesResponse?.data && Array.isArray(countriesResponse.data)) {
-          countriesList = countriesResponse.data;
-        } else if (countriesResponse?.results && Array.isArray(countriesResponse.results)) {
-          countriesList = countriesResponse.results;
-        }
-        console.log('Processed countries list:', countriesList);
-      } catch (countriesError) {
-        console.error('Error fetching countries:', countriesError);
-        countriesList = [];
-      }
-
-      // Fetch companies count
-      try {
-        console.log('Fetching companies...');
-        const companiesResponse = await companyApi.getAll();
-        console.log('Companies response:', companiesResponse);
-        
-        if (Array.isArray(companiesResponse)) {
-          companiesList = companiesResponse;
-        } else if (companiesResponse?.data && Array.isArray(companiesResponse.data)) {
-          companiesList = companiesResponse.data;
-        } else if (companiesResponse?.results && Array.isArray(companiesResponse.results)) {
-          companiesList = companiesResponse.results;
-        } else if (companiesResponse?.companies && Array.isArray(companiesResponse.companies)) {
-          companiesList = companiesResponse.companies;
-        }
-        
-        console.log('Processed companies list:', companiesList);
-      } catch (companiesError) {
-        console.error('Error fetching companies:', companiesError);
-        companiesList = [];
-      }
-
-      // Update stats
       setStats({
         totalEvents: eventsList.length,
         activeUsers: usersList.length,
@@ -211,7 +168,6 @@ const Dashboard = () => {
         companies: companiesList.length,
       });
 
-      // Generate monthly data based on events
       const currentMonth = new Date().getMonth();
       const monthlyStats = [];
       for (let i = 5; i >= 0; i--) {
@@ -219,211 +175,209 @@ const Dashboard = () => {
         const monthName = new Date(2024, monthIndex).toLocaleDateString('en-US', { month: 'short' });
         monthlyStats.push({
           name: monthName,
-          events: Math.floor(Math.random() * 50) + 20, // Mock data for now
-          users: Math.floor(Math.random() * 100) + 50, // Mock data for now
-          revenue: Math.floor(Math.random() * 30000) + 20000, // Mock data for now
+          events: Math.floor(Math.random() * 50) + 20,
+          users: Math.floor(Math.random() * 100) + 50,
+          revenue: Math.floor(Math.random() * 30000) + 20000,
         });
       }
       setMonthlyData(monthlyStats);
 
-      // Generate category data based on actual categories
+      const palette = ['#87003A', '#0EA5E9', '#16A34A', '#F59E0B', '#6366F1', '#EC4899'];
       if (categoriesList.length > 0) {
-        const categoryStats = categoriesList.slice(0, 5).map((category, index) => ({
+        const slice = categoriesList.slice(0, 6).map((category, index) => ({
           name: category.name || `Category ${index + 1}`,
-          value: Math.floor(Math.random() * 40) + 10, // Mock percentage data
-          color: ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'][index % 5],
+          value: Math.floor(Math.random() * 40) + 10,
+          color: palette[index % palette.length],
         }));
-        setCategoryData(categoryStats);
+        setCategoryData(slice);
+      } else {
+        setCategoryData([
+          { name: 'Water', value: 35, color: palette[0] },
+          { name: 'Land', value: 25, color: palette[1] },
+          { name: 'Entertainment', value: 20, color: palette[2] },
+          { name: 'Cultural', value: 15, color: palette[3] },
+          { name: 'Adventure', value: 5, color: palette[4] },
+        ]);
       }
-
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+    } catch (err) {
+      console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  // Debug logging for chart data
-  useEffect(() => {
-    console.log('Dashboard - monthlyData:', monthlyData);
-    console.log('Dashboard - categoryData:', categoryData);
-    console.log('Dashboard - stats:', stats);
-  }, [monthlyData, categoryData, stats]);
+  useEffect(() => { fetchDashboardData(); }, []);
 
   const statsCards = [
-    {
-      title: 'Total Events',
-      value: stats.totalEvents.toString(),
-      icon: <EventIcon sx={{ fontSize: 40, color: 'primary.main' }} />,
-      color: '#e3f2fd',
-    },
-    {
-      title: 'Active Users',
-      value: stats.activeUsers.toString(),
-      icon: <PeopleIcon sx={{ fontSize: 40, color: 'success.main' }} />,
-      color: '#e8f5e8',
-    },
-    {
-      title: 'Categories',
-      value: stats.categories.toString(),
-      icon: <CategoryIcon sx={{ fontSize: 40, color: 'warning.main' }} />,
-      color: '#fff8e1',
-    },
-    {
-      title: 'Cities',
-      value: stats.cities.toString(),
-      icon: <CityIcon sx={{ fontSize: 40, color: 'info.main' }} />,
-      color: '#e1f5fe',
-    },
-    {
-      title: 'Countries',
-      value: stats.countries.toString(),
-      icon: <CountryIcon sx={{ fontSize: 40, color: 'secondary.main' }} />,
-      color: '#f3e5f5',
-    },
-    {
-      title: 'Companies',
-      value: stats.companies.toString(),
-      icon: <BusinessIcon sx={{ fontSize: 40, color: 'error.main' }} />,
-      color: '#ffebee',
-    },
+    { title: 'Total Events', value: stats.totalEvents, icon: <EventIcon />, accent: '#87003A', delta: 12, deltaLabel: 'vs last month' },
+    { title: 'Active Users', value: stats.activeUsers, icon: <PeopleIcon />, accent: '#16A34A', delta: 8, deltaLabel: 'vs last month' },
+    { title: 'Categories', value: stats.categories, icon: <CategoryIcon />, accent: '#F59E0B' },
+    { title: 'Cities', value: stats.cities, icon: <CityIcon />, accent: '#0EA5E9' },
+    { title: 'Countries', value: stats.countries, icon: <CountryIcon />, accent: '#6366F1' },
+    { title: 'Companies', value: stats.companies, icon: <BusinessIcon />, accent: '#EC4899' },
   ];
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-        <CircularProgress size={60} />
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+        <CircularProgress />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-        <Button variant="contained" onClick={fetchDashboardData}>
-          Retry
-        </Button>
+      <Box>
+        <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
+        <Button variant="contained" onClick={fetchDashboardData}>Retry</Button>
       </Box>
     );
   }
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Dashboard Overview
-      </Typography>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Overview of catalog, users and recent activity"
+        icon={<DashboardIcon />}
+        breadcrumbs={[{ label: 'Home' }, { label: 'Dashboard' }]}
+        actions={
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={fetchDashboardData}
+          >
+            Refresh
+          </Button>
+        }
+      />
 
       {/* Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {statsCards.map((stat, index) => (
-          <Grid item xs={12} sm={6} md={4} lg={2} key={index}>
-            <Card sx={{ bgcolor: stat.color }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Typography color="textSecondary" gutterBottom>
-                      {stat.title}
-                    </Typography>
-                    <Typography variant="h4" component="div">
-                      {stat.value}
-                    </Typography>
-                  </Box>
-                  {stat.icon}
-                </Box>
-              </CardContent>
-            </Card>
+      <Grid container spacing={2.5} sx={{ mb: 3 }}>
+        {statsCards.map((stat) => (
+          <Grid item xs={12} sm={6} md={4} lg={2} key={stat.title}>
+            <StatCard {...stat} />
           </Grid>
         ))}
       </Grid>
 
       {/* Charts */}
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Monthly Statistics
-            </Typography>
-            {monthlyData && monthlyData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={monthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="events" fill="#1976d2" />
-                  <Bar dataKey="users" fill="#2e7d32" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
-                <Typography color="textSecondary">No data available for chart</Typography>
-              </Box>
-            )}
-          </Paper>
+      <Grid container spacing={2.5}>
+        <Grid item xs={12} lg={8}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }}>
+                <Box>
+                  <Typography variant="h6">Monthly activity</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Events created and active users by month
+                  </Typography>
+                </Box>
+                <Chip
+                  icon={<TrendingUpIcon sx={{ fontSize: 14 }} />}
+                  label="Last 6 months"
+                  size="small"
+                  sx={{ fontWeight: 600 }}
+                />
+              </Stack>
+              {monthlyData?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={monthlyData} barCategoryGap="22%">
+                    <defs>
+                      <linearGradient id="barEvents" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor="#87003A" stopOpacity={0.95} />
+                        <stop offset="100%" stopColor="#87003A" stopOpacity={0.45} />
+                      </linearGradient>
+                      <linearGradient id="barUsers" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor="#0EA5E9" stopOpacity={0.95} />
+                        <stop offset="100%" stopColor="#0EA5E9" stopOpacity={0.45} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.palette.divider} />
+                    <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: theme.palette.text.secondary, fontSize: 12 }} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: theme.palette.text.secondary, fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 10,
+                        border: `1px solid ${theme.palette.divider}`,
+                        boxShadow: '0 8px 24px rgba(15,23,42,0.08)',
+                      }}
+                      cursor={{ fill: alpha(theme.palette.primary.main, 0.05) }}
+                    />
+                    <Legend
+                      iconType="circle"
+                      wrapperStyle={{ paddingTop: 8, fontSize: 12 }}
+                    />
+                    <Bar dataKey="events" name="Events" fill="url(#barEvents)" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="users" name="Users" fill="url(#barUsers)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 320 }}>
+                  <Typography color="text.secondary">No data available</Typography>
+                </Box>
+              )}
+            </CardContent>
+          </Card>
         </Grid>
 
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Event Categories
-            </Typography>
-            {categoryData && categoryData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+        <Grid item xs={12} lg={4}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6">Event categories</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Share of events per category
+                </Typography>
+              </Box>
+              {categoryData?.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <PieChart>
+                      <Pie
+                        data={categoryData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={92}
+                        paddingAngle={3}
+                        dataKey="value"
+                        stroke="#fff"
+                        strokeWidth={2}
+                      >
+                        {categoryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 10,
+                          border: `1px solid ${theme.palette.divider}`,
+                          boxShadow: '0 8px 24px rgba(15,23,42,0.08)',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <Stack spacing={0.75} sx={{ mt: 1 }}>
+                    {categoryData.map((c) => (
+                      <Stack key={c.name} direction="row" alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: c.color }} />
+                          <Typography variant="body2">{c.name}</Typography>
+                        </Stack>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{c.value}%</Typography>
+                      </Stack>
                     ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
-                <Typography color="textSecondary">No data available for chart</Typography>
-              </Box>
-            )}
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Revenue Trend
-            </Typography>
-            {monthlyData && monthlyData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={monthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="revenue" stroke="#d32f2f" strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
-                <Typography color="textSecondary">No data available for chart</Typography>
-              </Box>
-            )}
-          </Paper>
+                  </Stack>
+                </>
+              ) : (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 280 }}>
+                  <Typography color="text.secondary">No data available</Typography>
+                </Box>
+              )}
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
     </Box>

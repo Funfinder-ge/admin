@@ -30,7 +30,9 @@ import {
   Checkbox,
   LinearProgress,
   Card,
-  CardContent
+  CardContent,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -57,7 +59,17 @@ import apiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import MapPicker from '../components/MapPicker';
 
+const getImageUrl = (imgPath) => {
+  if (!imgPath) return null;
+  if (typeof imgPath !== 'string') return null;
+  if (imgPath.startsWith('http')) return imgPath;
+  if (imgPath.startsWith('/')) return `https://base.funfinder.ge${imgPath}`;
+  return `https://base.funfinder.ge/${imgPath}`;
+};
+
 const Events = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { canCreate, canUpdate, canDelete, canRead } = useAuth();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -110,7 +122,10 @@ const Events = () => {
     is_popular: false,
     is_active: true,
     is_featured: false,
-    company_id: ''
+    company_id: '',
+    image: null,
+    image_alt_text: '',
+    image_is_primary: true
   });
 
   // Additional state for dropdowns
@@ -412,7 +427,10 @@ const Events = () => {
         is_popular: event.is_popular || false,
         is_active: event.is_active !== undefined ? event.is_active : true,
         is_featured: event.is_featured || false,
-        company_id: event.company || event.company_id || ''
+        company_id: event.company || event.company_id || '',
+        image: null,
+        image_alt_text: '',
+        image_is_primary: true
       });
     } else {
       // Creating new event
@@ -432,7 +450,10 @@ const Events = () => {
         is_popular: false,
         is_active: true,
         is_featured: false,
-        company_id: ''
+        company_id: '',
+        image: null,
+        image_alt_text: '',
+        image_is_primary: true
       });
     }
     setOpenDialog(true);
@@ -457,8 +478,29 @@ const Events = () => {
       is_popular: false,
       is_active: true,
       is_featured: false,
-      company_id: ''
+      company_id: '',
+      image: null,
+      image_alt_text: '',
+      image_is_primary: true
     });
+  };
+
+  // Handle image file selection inside the create/edit dialog
+  const handleFormImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setSnackbar({ open: true, message: 'Please select a valid image file (PNG, JPEG, GIF, or WebP)', severity: 'error' });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setSnackbar({ open: true, message: 'Image file size must be less than 10MB', severity: 'error' });
+      return;
+    }
+
+    setFormData(prev => ({ ...prev, image: file }));
   };
 
   // Validate form data
@@ -585,6 +627,7 @@ const Events = () => {
       console.log('==========================');
 
       let response;
+      let savedEventId = editingEvent?.id;
     if (editingEvent && editingEvent.id) {
         // Update existing event
         console.log('=== UPDATING EVENT ===');
@@ -609,6 +652,7 @@ const Events = () => {
         try {
           response = await eventApiV2.create(eventData);
           console.log('Create response:', response);
+          savedEventId = response?.id || response?.data?.id || response?.event?.id || response?.result?.id;
           setSnackbar({
             open: true,
             message: 'Event created successfully',
@@ -618,6 +662,36 @@ const Events = () => {
           console.error('Create failed:', createError);
           throw createError;
         }
+      }
+
+      // Upload image if one was selected in the form
+      if (formData.image && savedEventId) {
+        try {
+          const imageFormData = new FormData();
+          imageFormData.append('image', formData.image);
+          imageFormData.append('alt_text', formData.image_alt_text?.trim() || formData.name.trim());
+          imageFormData.append('is_primary', formData.image_is_primary);
+
+          await eventApi.uploadImage(savedEventId, imageFormData);
+          setSnackbar({
+            open: true,
+            message: editingEvent ? 'Event and image updated successfully' : 'Event created and image uploaded successfully',
+            severity: 'success'
+          });
+        } catch (imageError) {
+          console.error('Image upload failed:', imageError);
+          setSnackbar({
+            open: true,
+            message: `Event saved, but image upload failed: ${imageError.response?.data?.detail || imageError.message}`,
+            severity: 'warning'
+          });
+        }
+      } else if (formData.image && !savedEventId) {
+        setSnackbar({
+          open: true,
+          message: 'Event saved, but image could not be uploaded (missing event id).',
+          severity: 'warning'
+        });
       }
 
       console.log('API Response:', response);
@@ -738,19 +812,35 @@ const Events = () => {
     }
   };
 
-  // Handle view details button click (prefer v1 details)
+  // Handle view details button click
   const handleViewDetails = async (event) => {
     console.log('Viewing details for event:', event.name, 'ID:', event.id);
     setDetailsLoading(true);
     setDetailsModalOpen(true);
     
     try {
-      // Use v1 details endpoint
-      const response = await eventApi.getById(event.id);
-      console.log('Using v1 event details endpoint');
+      // Use getDetails endpoint which calls /event/details/${id}
+      const response = await eventApi.getDetails(event.id);
+      console.log('Using event details endpoint');
 
       console.log('Event details response:', response);
-      setEventDetails(response);
+      console.log('Event details response keys:', Object.keys(response || {}));
+      console.log('Event details images:', response?.images);
+      console.log('Event details images type:', typeof response?.images);
+      console.log('Event details images length:', response?.images?.length);
+      
+      // Handle different response structures
+      let eventDetailsData = response;
+      if (response?.data) {
+        eventDetailsData = response.data;
+      }
+      
+      // Log the final event details data
+      console.log('Final eventDetailsData:', eventDetailsData);
+      console.log('Final eventDetailsData images:', eventDetailsData?.images);
+      console.log('Final eventDetailsData images length:', eventDetailsData?.images?.length);
+      
+      setEventDetails(eventDetailsData);
     } catch (error) {
       console.error('Error fetching event details:', error);
       setSnackbar({
@@ -1024,70 +1114,50 @@ const Events = () => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: { xs: 'column', md: 'row' }, 
+        justifyContent: 'space-between', 
+        alignItems: { xs: 'flex-start', md: 'center' }, 
+        mb: 4,
+        p: 3,
+        borderRadius: 3,
+        background: 'linear-gradient(135deg, #ffffff 0%, #f4f6f8 100%)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.04)',
+        gap: { xs: 2, md: 0 }
+      }}>
+        <Typography variant="h4" sx={{ fontWeight: 800, background: 'linear-gradient(45deg, #1976d2, #9c27b0)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
           Events Management
         </Typography>
-        <Box>
+        <Box sx={{ display: 'flex', gap: 2, width: { xs: '100%', md: 'auto' } }}>
           {canCreate && (
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
               onClick={() => handleOpenDialog()}
-              sx={{ mr: 2 }}
-        >
-          Add Event
-        </Button>
+              sx={{ 
+                borderRadius: 2, 
+                px: 3,
+                boxShadow: '0 4px 14px rgba(25, 118, 210, 0.4)',
+                flex: { xs: 1, md: 'none' }
+              }}
+            >
+              Add Event
+            </Button>
           )}
-                     <Button
-             variant="outlined"
-             startIcon={<RefreshIcon />}
-             onClick={fetchEvents}
-             disabled={loading}
-           >
-             Refresh
-           </Button>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={fetchEvents}
+            disabled={loading}
+            sx={{ 
+              borderRadius: 2,
+              flex: { xs: 1, md: 'none' }
+            }}
+          >
+            Refresh
+          </Button>
         </Box>
-      </Box>
-
-      {/* Debug Info - Coordinates Display */}
-      <Box sx={{ mb: 3, p: 2, bgcolor: 'info.50', borderRadius: 2, border: '1px solid #2196f3' }}>
-        <Typography variant="h6" sx={{ mb: 2, color: 'info.main' }}>
-          Events Coordinates Debug
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-          {events.slice(0, 5).map((event) => (
-            <Card key={event.id} sx={{ p: 2, minWidth: 200, border: '1px solid #e0e0e0' }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                {event.name}
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                {(() => {
-                  const coords = extractCoordinates(event);
-                  return (
-                    <>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <LocationIcon sx={{ fontSize: 14, color: 'primary.main' }} />
-                        <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                          Lat: {coords.latitude || 'N/A'}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <LocationIcon sx={{ fontSize: 14, color: 'secondary.main' }} />
-                        <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                          Lng: {coords.longitude || 'N/A'}
-                        </Typography>
-                      </Box>
-                    </>
-                  );
-                })()}
-              </Box>
-            </Card>
-          ))}
-        </Box>
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-          Showing first 5 events with their coordinates
-        </Typography>
       </Box>
 
       {loading ? (
@@ -1100,231 +1170,237 @@ const Events = () => {
             No events found
           </Typography>
         </Box>
+      ) : isMobile ? (
+        <Grid container spacing={3}>
+          {events
+            .filter(event => event && event.id && typeof event.id !== 'undefined')
+            .map((event) => {
+              const coords = extractCoordinates(event);
+              return (
+                <Grid item xs={12} key={event.id} sx={{ display: 'flex', width: '100%' }}>
+                  <Card sx={{
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    width: '100%',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: '0 12px 32px rgba(0,0,0,0.1)'
+                    }
+                  }}>
+                    <Box sx={{ position: 'relative', height: 180, backgroundColor: '#f0f2f5' }}>
+                      {event.image || event.primary_image ? (
+                        <>
+                          <img
+                            src={getImageUrl(event.image || event.primary_image?.image)}
+                            alt={event.primary_image?.alt_text || event.name || 'Event image'}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              const fallback = e.target.parentElement?.querySelector('.fallback-icon');
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                          <Box className="fallback-icon" sx={{ display: 'none', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                            <ImageIcon sx={{ color: 'text.secondary', fontSize: 40 }} />
+                          </Box>
+                        </>
+                      ) : (
+                        <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <ImageIcon sx={{ color: 'text.secondary', fontSize: 40 }} />
+                        </Box>
+                      )}
+                      
+                      <Box sx={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 1 }}>
+                        <Chip 
+                          label={event.is_active ? 'Active' : 'Inactive'} 
+                          sx={{ 
+                            backgroundColor: event.is_active ? 'rgba(46, 204, 113, 0.9)' : 'rgba(231, 76, 60, 0.9)', 
+                            color: 'white', 
+                            fontWeight: 600, 
+                            backdropFilter: 'blur(4px)' 
+                          }} 
+                          size="small" 
+                        />
+                      </Box>
+                    </Box>
+                    <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1, color: '#1a1f36' }}>
+                        {event.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <LocationIcon sx={{ fontSize: 16, color: 'primary.main', mr: 0.5 }} />
+                        <Typography variant="body2" color="text.secondary">
+                          {event.city?.name || event.city || 'N/A'} • {event.location || 'N/A'}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 1, mb: 3, flexWrap: 'wrap' }}>
+                        <Chip label={event.category?.name || event.category || 'N/A'} size="small" sx={{ backgroundColor: '#f3f4f6', color: '#4b5563', fontWeight: 600 }} />
+                        {event.is_popular && <Chip label="Popular" size="small" sx={{ backgroundColor: '#fff3cd', color: '#856404', fontWeight: 600 }} />}
+                        {event.is_featured && <Chip label="Featured" size="small" sx={{ backgroundColor: '#cce5ff', color: '#004085', fontWeight: 600 }} />}
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1.5, borderTop: '1px solid #f0f0f0' }}>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                            Price
+                          </Typography>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1a1f36' }}>
+                            ${event.price_per_person || 'N/A'}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'right' }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                            Capacity
+                          </Typography>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#1a1f36' }}>
+                            {event.min_people || 'N/A'} - {event.max_people || 'N/A'}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 1, mt: 'auto', pt: 2, borderTop: '1px solid #f0f0f0', justifyContent: 'flex-end' }}>
+                        {canRead && (
+                          <Tooltip title="View Details">
+                            <IconButton size="small" onClick={() => handleViewDetails(event)} sx={{ backgroundColor: '#e3f2fd', color: '#1976d2', '&:hover': { backgroundColor: '#bbdefb' } }}>
+                              <ViewIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {canUpdate && (
+                          <Tooltip title="Edit Event">
+                            <IconButton size="small" onClick={() => handleOpenDialog(event)} sx={{ backgroundColor: '#f3e5f5', color: '#9c27b0', '&:hover': { backgroundColor: '#e1bee7' } }}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="Add Image">
+                          <IconButton size="small" onClick={() => handleAddImage(event)} sx={{ backgroundColor: '#fff8e1', color: '#f57c00', '&:hover': { backgroundColor: '#ffecb3' } }}>
+                            <ImageIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {canDelete && (
+                          <Tooltip title="Delete Event">
+                            <IconButton size="small" onClick={() => handleDeleteEvent(event.id)} sx={{ backgroundColor: '#ffebee', color: '#d32f2f', '&:hover': { backgroundColor: '#ffcdd2' } }}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+        </Grid>
       ) : (
-        <TableContainer component={Paper}>
-          <Table>
-                            <TableHead>
-                  <TableRow>
-                    <TableCell>Event</TableCell>
-                    <TableCell>Image</TableCell>
-                    <TableCell>Category</TableCell>
-                    <TableCell>City</TableCell>
-                    <TableCell>Location</TableCell>
-                    <TableCell>Coordinates</TableCell>
-                    <TableCell>Base Price</TableCell>
-                    <TableCell>Price per Person</TableCell>
-                    <TableCell>Capacity</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell align="center">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
+        <TableContainer component={Paper} sx={{ borderRadius: 3, boxShadow: '0 8px 32px rgba(0,0,0,0.04)', overflow: 'hidden', border: 'none' }}>
+          <Table sx={{ minWidth: 1000 }}>
+            <TableHead sx={{ backgroundColor: '#fafbfc' }}>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 600, color: '#4a5568', py: 2 }}>Event Details</TableCell>
+                <TableCell sx={{ fontWeight: 600, color: '#4a5568', py: 2 }}>Category & Location</TableCell>
+                <TableCell sx={{ fontWeight: 600, color: '#4a5568', py: 2 }}>Pricing</TableCell>
+                <TableCell sx={{ fontWeight: 600, color: '#4a5568', py: 2 }}>Status</TableCell>
+                <TableCell align="center" sx={{ fontWeight: 600, color: '#4a5568', py: 2 }}>Actions</TableCell>
+              </TableRow>
+            </TableHead>
             <TableBody>
               {events
                 .filter(event => event && event.id && typeof event.id !== 'undefined')
                 .map((event) => (
-                <TableRow key={event.id}>
+                <TableRow key={event.id} hover sx={{ '&:hover': { backgroundColor: '#f8fafd' }, transition: 'background-color 0.2s ease' }}>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <EventIcon sx={{ mr: 2, color: 'primary.main' }} />
-                      <Box>
-                        <Typography variant="subtitle2">
-                          {event.name}
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary" sx={{ maxWidth: 200 }}>
-                          {event.description?.length > 100 
-                            ? `${event.description.substring(0, 100)}...` 
-                            : event.description}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    {event.image || event.primary_image ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                        <img
-                          src={event.image || (event.primary_image && `https://base.funfinder.ge/${event.primary_image.image}`)}
-                          alt={event.primary_image?.alt_text || event.name || 'Event image'}
-                          style={{
-                            width: 60,
-                            height: 60,
-                            objectFit: 'cover',
-                            borderRadius: 8,
-                            border: '1px solid #e0e0e0'
-                          }}
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                            e.target.nextSibling.style.display = 'flex';
-                          }}
-                        />
-                        <Box
-                          sx={{
-                            width: 60,
-                            height: 60,
-                            display: 'none',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: '#f5f5f5',
-                            borderRadius: 8,
-                            border: '1px solid #e0e0e0'
-                          }}
-                        >
-                          <ImageIcon sx={{ color: 'text.secondary', fontSize: 24 }} />
-                        </Box>
-                      </Box>
-                    ) : (
-                      <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                        <Box
-                          sx={{
-                            width: 60,
-                            height: 60,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: '#f5f5f5',
-                            borderRadius: 8,
-                            border: '1px solid #e0e0e0'
-                          }}
-                        >
-                          <ImageIcon sx={{ color: 'text.secondary', fontSize: 24 }} />
-                        </Box>
-                      </Box>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {event.category?.name || event.category || 'N/A'}
-                  </TableCell>
-                  <TableCell>
-                    {event.city?.name || event.city || 'N/A'}
-                  </TableCell>
-                  <TableCell>
-                    {event.location || 'N/A'}
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 120 }}>
-                      {(() => {
-                        const coords = extractCoordinates(event);
-                        return (
+                      <Box sx={{ mr: 2, position: 'relative' }}>
+                        {event.image || event.primary_image ? (
                           <>
-                            <Box sx={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: 1,
-                              p: 1,
-                              backgroundColor: '#e3f2fd',
-                              borderRadius: 1,
-                              border: '1px solid #1976d2'
-                            }}>
-                              <LocationIcon sx={{ fontSize: 16, color: 'primary.main' }} />
-                              <Box>
-                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontSize: '0.7rem' }}>
-                                  Latitude
-                                </Typography>
-                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                                  {coords.latitude || 'N/A'}
-                                </Typography>
-                              </Box>
-                            </Box>
-                            <Box sx={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: 1,
-                              p: 1,
-                              backgroundColor: '#f3e5f5',
-                              borderRadius: 1,
-                              border: '1px solid #9c27b0'
-                            }}>
-                              <LocationIcon sx={{ fontSize: 16, color: 'secondary.main' }} />
-                              <Box>
-                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontSize: '0.7rem' }}>
-                                  Longitude
-                                </Typography>
-                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'secondary.main' }}>
-                                  {coords.longitude || 'N/A'}
-                                </Typography>
-                              </Box>
+                            <img
+                              src={getImageUrl(event.image || event.primary_image?.image)}
+                              alt={event.primary_image?.alt_text || event.name || 'Event image'}
+                              style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                const fallback = e.target.parentElement?.querySelector('.event-thumb-fallback');
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                            <Box className="event-thumb-fallback" sx={{ display: 'none', width: 64, height: 64, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0f2f5', borderRadius: 12 }}>
+                              <ImageIcon sx={{ color: 'text.secondary', fontSize: 28 }} />
                             </Box>
                           </>
-                        );
-                      })()}
+                        ) : (
+                          <Box sx={{ width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0f2f5', borderRadius: 12 }}>
+                            <ImageIcon sx={{ color: 'text.secondary', fontSize: 28 }} />
+                          </Box>
+                        )}
+                      </Box>
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1a202c', fontSize: '0.95rem' }}>
+                          {event.name}
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#718096', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                          {event.description}
+                        </Typography>
+                      </Box>
                     </Box>
                   </TableCell>
                   <TableCell>
-                    ${event.base_price || 'N/A'}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      <Chip label={event.category?.name || event.category || 'N/A'} size="small" sx={{ width: 'fit-content', backgroundColor: '#edf2f7', color: '#2d3748', fontWeight: 600 }} />
+                      <Typography variant="body2" sx={{ color: '#4a5568', mt: 1, display: 'flex', alignItems: 'center' }}>
+                        <LocationIcon sx={{ fontSize: 14, mr: 0.5, color: '#a0aec0' }} />
+                        {event.city?.name || event.city || 'N/A'}
+                      </Typography>
+                    </Box>
                   </TableCell>
                   <TableCell>
-                    ${event.price_per_person || 'N/A'}
-                  </TableCell>
-                  <TableCell>
-                    {event.min_people || 'N/A'} - {event.max_people || 'N/A'}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#2d3748' }}>
+                        ${event.price_per_person || 'N/A'} <span style={{ fontWeight: 400, color: '#a0aec0' }}>/ person</span>
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#718096' }}>
+                        Capacity: {event.min_people || 'N/A'} - {event.max_people || 'N/A'}
+                      </Typography>
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                      <Chip 
-                        label={event.is_active ? 'Inactive' : 'Active'} 
-                        color={event.is_active ? 'error' : 'success'} 
-                        size="small" 
-                      />
-                      {event.is_popular && (
-                        <Chip 
-                          label="Popular" 
-                          color="warning" 
-                          size="small" 
-                        />
-                      )}
-                      {event.is_featured && (
-                        <Chip 
-                          label="Featured" 
-                          color="primary" 
-                          size="small" 
-                        />
-                      )}
+                      <Chip label={event.is_active ? 'Active' : 'Inactive'} sx={{ backgroundColor: event.is_active ? '#c6f6d5' : '#fed7d7', color: event.is_active ? '#22543d' : '#822727', fontWeight: 600 }} size="small" />
+                      {event.is_popular && <Chip label="Popular" sx={{ backgroundColor: '#feebc8', color: '#7b341e', fontWeight: 600 }} size="small" />}
+                      {event.is_featured && <Chip label="Featured" sx={{ backgroundColor: '#eebafa', color: '#44337a', fontWeight: 600 }} size="small" />}
                     </Box>
                   </TableCell>
                   <TableCell align="center">
                     <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
                       {canRead && (
                         <Tooltip title="View Details">
-                          <IconButton 
-                            size="small" 
-                            color="info"
-                            onClick={() => handleViewDetails(event)}
-                          >
-                            <ViewIcon />
+                          <IconButton size="small" onClick={() => handleViewDetails(event)} sx={{ color: '#3182ce', backgroundColor: '#ebf8ff', '&:hover': { backgroundColor: '#bee3f8' } }}>
+                            <ViewIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
                       {canUpdate && (
                         <Tooltip title="Edit Event">
-                          <IconButton 
-                            size="small" 
-                            color="primary"
-                            onClick={() => handleOpenDialog(event)}
-                          >
-                            <EditIcon />
+                          <IconButton size="small" onClick={() => handleOpenDialog(event)} sx={{ color: '#805ad5', backgroundColor: '#faf5ff', '&:hover': { backgroundColor: '#e9d8fd' } }}>
+                            <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
                       <Tooltip title="Add Image">
-                        <IconButton 
-                          size="small" 
-                          color="secondary"
-                          onClick={() => handleAddImage(event)}
-                        >
-                          <ImageIcon />
+                        <IconButton size="small" onClick={() => handleAddImage(event)} sx={{ color: '#dd6b20', backgroundColor: '#fffff0', '&:hover': { backgroundColor: '#fefcbf' } }}>
+                          <ImageIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       {canDelete && (
                         <Tooltip title="Delete Event">
-                          <IconButton 
-                            size="small" 
-                            color="error"
-                            onClick={() => handleDeleteEvent(event.id)}
-                          >
-                            <DeleteIcon />
+                          <IconButton size="small" onClick={() => handleDeleteEvent(event.id)} sx={{ color: '#e53e3e', backgroundColor: '#fff5f5', '&:hover': { backgroundColor: '#fed7d7' } }}>
+                            <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-    </Box>
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1513,7 +1589,7 @@ const Events = () => {
               <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
-                  placeholder="Base Price"
+                  placeholder="Price Per Person"
                   type="number"
                   value={formData.base_price}
                   onChange={(e) => handleInputChange('base_price', e.target.value)}
@@ -1539,7 +1615,7 @@ const Events = () => {
               <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
-                  placeholder="Price per Person"
+                  placeholder="Base Price"
                   type="number"
                   value={formData.price_per_person}
                   onChange={(e) => handleInputChange('price_per_person', e.target.value)}
@@ -1733,6 +1809,93 @@ const Events = () => {
                 </Button>
               </Grid>
             </Grid>
+          </Box>
+
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" sx={{ color: '#ff6b35', fontWeight: 'bold', mb: 2 }}>
+              Event Image
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {editingEvent
+                ? 'Optional. Upload a new image to add to this event. Existing images are not replaced.'
+                : 'Optional. Upload an image to attach when the event is created.'}
+            </Typography>
+
+            <Box sx={{ mb: 2 }}>
+              <input
+                accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+                style={{ display: 'none' }}
+                id="event-form-image-upload"
+                type="file"
+                onChange={handleFormImageChange}
+              />
+              <label htmlFor="event-form-image-upload">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  fullWidth
+                  sx={{
+                    py: 2,
+                    borderStyle: 'dashed',
+                    borderWidth: 2,
+                    '&:hover': { borderStyle: 'dashed', borderWidth: 2 }
+                  }}
+                >
+                  {formData.image ? (
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="body1" color="primary">
+                        {formData.image.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {(formData.image.size / 1024 / 1024).toFixed(2)} MB
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Box sx={{ textAlign: 'center' }}>
+                      <ImageIcon sx={{ fontSize: 40, color: 'text.secondary', mb: 1 }} />
+                      <Typography variant="body1">Click to select an image</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        PNG, JPEG, GIF, WebP — max 10MB
+                      </Typography>
+                    </Box>
+                  )}
+                </Button>
+              </label>
+              {formData.image && (
+                <Button
+                  size="small"
+                  color="error"
+                  sx={{ mt: 1 }}
+                  onClick={() => setFormData(prev => ({ ...prev, image: null }))}
+                >
+                  Remove selected image
+                </Button>
+              )}
+            </Box>
+
+            {formData.image && (
+              <>
+                <TextField
+                  fullWidth
+                  label="Alternative Text"
+                  placeholder="Describe the image for accessibility (defaults to event name)"
+                  value={formData.image_alt_text}
+                  onChange={(e) => handleInputChange('image_alt_text', e.target.value)}
+                  multiline
+                  rows={2}
+                  sx={{ mb: 2 }}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={formData.image_is_primary}
+                      onChange={(e) => handleInputChange('image_is_primary', e.target.checked)}
+                    />
+                  }
+                  label="Set as primary image"
+                />
+              </>
+            )}
           </Box>
 
           <Box sx={{ mb: 3 }}>
@@ -2289,7 +2452,13 @@ const Events = () => {
               <Box sx={{ mb: 4 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                   <Typography variant="h6" sx={{ color: '#ff6b35', fontWeight: 'bold' }}>
-                    Event Images ({eventDetails.images?.length || 0})
+                    Event Images ({(() => {
+                      const images = eventDetails.images || eventDetails.event_images || [];
+                      console.log('Admin - Images count - eventDetails.images:', eventDetails.images);
+                      console.log('Admin - Images count - eventDetails.event_images:', eventDetails.event_images);
+                      console.log('Admin - Images count - final:', images.length);
+                      return images.length;
+                    })()})
                   </Typography>
                   {canCreate && (
                     <Button
@@ -2303,9 +2472,14 @@ const Events = () => {
                   )}
                 </Box>
                 
-                {eventDetails.images && eventDetails.images.length > 0 ? (
+                {(() => {
+                  const images = eventDetails.images || eventDetails.event_images || [];
+                  console.log('Admin - Rendering images section. Images array:', images);
+                  return images.length > 0 ? (
                   <Grid container spacing={2}>
-                    {eventDetails.images.map((image, index) => (
+                    {images.map((image, index) => {
+                      console.log('Admin - Rendering image:', image, 'index:', index);
+                      return (
                       <Grid item xs={12} sm={6} md={4} key={index}>
                         <Card sx={{ 
                           p: 2, 
@@ -2336,7 +2510,11 @@ const Events = () => {
                           {/* Image */}
                           <Box sx={{ position: 'relative', mb: 2 }}>
                             <img
-                              src={`${image.image}`}
+                              src={image.image?.startsWith('http') 
+                                ? image.image 
+                                : image.image?.startsWith('/')
+                                ? `https://base.funfinder.ge${image.image}`
+                                : `https://base.funfinder.ge/${image.image}`}
                               alt={image.alt_text || 'Event image'}
                               style={{
                                 width: '100%',
@@ -2345,9 +2523,18 @@ const Events = () => {
                                 borderRadius: 8,
                                 cursor: 'pointer'
                               }}
+                              onError={(e) => {
+                                console.error('Image load error:', image.image, e);
+                                e.target.style.display = 'none';
+                              }}
                               onClick={() => {
                                 // Open image in new tab for full view
-                                window.open(image.image, '_blank');
+                                const imageUrl = image.image?.startsWith('http') 
+                                  ? image.image 
+                                  : image.image?.startsWith('/')
+                                  ? `https://base.funfinder.ge${image.image}`
+                                  : `https://base.funfinder.ge/${image.image}`;
+                                window.open(imageUrl, '_blank');
                               }}
                             />
                             
@@ -2412,9 +2599,10 @@ const Events = () => {
                           </Box>
                         </Card>
                       </Grid>
-                    ))}
+                      );
+                    })}
                   </Grid>
-                ) : (
+                  ) : (
                   <Box sx={{ 
                     textAlign: 'center', 
                     py: 4, 
@@ -2439,7 +2627,8 @@ const Events = () => {
                       </Button>
                     )}
                   </Box>
-                )}
+                );
+                })()}
               </Box>
 
               {/* Creation Date */}

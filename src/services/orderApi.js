@@ -25,7 +25,7 @@ const getAuthToken = () => {
  */
 class AdminOrderApiService {
   constructor() {
-    this.baseURL = 'https://base.funfinder.ge/en/api/v5';
+    this.baseURL = 'https://base.funfinder.ge/api/v5';
     
     // Create axios instance
     this.axios = axios.create({

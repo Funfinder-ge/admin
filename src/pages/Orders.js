@@ -183,14 +183,18 @@ const OrdersPage = () => {
   };
 
   // Filter orders
+  const failedStatuses = ['failed', 'cancelled', 'canceled', 'rejected', 'expired'];
   const filteredOrders = orders.filter(order => {
-    const matchesSearch = !searchTerm || 
+    const status = (order.status || order.payment_status || '').toLowerCase();
+    if (failedStatuses.includes(status)) return false;
+
+    const matchesSearch = !searchTerm ||
       order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customer_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.order_number?.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
 
@@ -571,7 +575,7 @@ const OrdersPage = () => {
       {!loading && !error && (
         <Box mb={3}>
           <Typography variant="h6" color="text.secondary">
-            ნაპოვნია {filteredOrders.length} შეკვეთა
+          Found {filteredTours.length} Order
           </Typography>
         </Box>
       )}
@@ -608,7 +612,7 @@ const OrdersPage = () => {
                 <TableRow>
                   <TableCell colSpan={13} align="center">
                     <Typography variant="body1" color="text.secondary">
-                      შეკვეთები არ მოიძებნა
+                Orders not found
                     </Typography>
                   </TableCell>
                 </TableRow>
